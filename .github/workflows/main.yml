@@ -2,7 +2,7 @@ name: Update File Utility (Release)
 
 on:
   schedule:
-    - cron: "0 0 * * 0"
+    - cron: "0 0 * * 0"   # every Sunday
   workflow_dispatch:
 
 jobs:
@@ -21,22 +21,33 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget dpkg-dev rsync zip
 
-      - name: Detect latest Vifm version
+      - name: Detect latest File version using Termux Packages index
         id: get_version
         run: |
-          BASE_URL="https://grimler.se/termux-packages-24/pool/main/f/file/"
-          wget -qO- "$BASE_URL" \
-            | grep -o 'vifm_[^"]*_aarch64.deb' \
-            | sort -V \
-            | tail -n1 > latest.txt
+          # Base URL for aarch64 Packages index
+          BASE_INDEX="https://grimler.se/termux-main/dists/stable/main/binary-aarch64/Packages"
 
-          FILE=$(cat latest.txt)
-          VERSION=$(echo "$FILE" | sed -E 's/file_([^_]*)_.*/\1/')
+          # Extract latest filename for package "file"
+          LATEST_FILE=$(wget -qO- "$BASE_INDEX" \
+            | awk '/^Package: file$/ {pkg=1; next} pkg && /^Filename:/ {print $2; pkg=0}' \
+            | sort -V \
+            | tail -n1)
+
+          if [[ -z "$LATEST_FILE" ]]; then
+            echo "Error: Could not find latest file package!"
+            exit 1
+          fi
+
+          # Extract version from filename
+          VERSION=$(basename "$LATEST_FILE" | sed -E 's/file_([^_]*)_.*/\1/')
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "file=$LATEST_FILE" >> $GITHUB_OUTPUT
+          echo "Latest file package: $LATEST_FILE"
+          echo "Version: $VERSION"
 
       - name: Download, normalize paths, and zip per-ABI
         run: |
-          BASE_URL="https://grimler.se/termux-main/pool/main/f/file/"
           VERSION="${{ steps.get_version.outputs.version }}"
 
           declare -A archs=(
@@ -50,13 +61,29 @@ jobs:
           mkdir -p dist work
 
           for arch in "${!archs[@]}"; do
-            DEB="file_${VERSION}_${arch}.deb"
-            echo "Downloading $DEB"
-            wget -q "$BASE_URL$DEB" -O "$DEB"
+            BASE_INDEX="https://grimler.se/termux-main/dists/stable/main/binary-${arch}/Packages"
+
+            # Get the exact filename for this architecture
+            DEB_PATH=$(wget -qO- "$BASE_INDEX" \
+              | awk '/^Package: file$/ {pkg=1; next} pkg && /^Filename:/ {print $2; pkg=0}' \
+              | grep "_${arch}\.deb$" \
+              | sort -V \
+              | tail -n1)
+
+            if [[ -z "$DEB_PATH" ]]; then
+              echo "Warning: Could not find file package for $arch, skipping..."
+              continue
+            fi
+
+            FILE_NAME=$(basename "$DEB_PATH")
+            URL="https://grimler.se/termux-main/$DEB_PATH"
+
+            echo "Downloading $FILE_NAME from $URL"
+            wget -q "$URL" -O "$FILE_NAME"
 
             # Extract deb
             mkdir -p "work/$arch"
-            dpkg-deb -x "$DEB" "work/$arch"
+            dpkg-deb -x "$FILE_NAME" "work/$arch"
 
             # Normalize layout: copy usr/ only
             mkdir -p "dist/file-$arch/usr"
