@@ -2,7 +2,7 @@ name: Update File Utility (Release)
 
 on:
   schedule:
-    - cron: "0 0 * * 0"
+    - cron: "0 0 * * 0"   # every Sunday
   workflow_dispatch:
 
 jobs:
@@ -25,14 +25,24 @@ jobs:
         id: get_version
         run: |
           BASE_URL="https://grimler.se/termux-main/pool/main/f/file/"
+
+          # Extract latest aarch64 deb filename with proper version
           wget -qO- "$BASE_URL" \
-            | grep -o 'file_[^"]*_aarch64.deb' \
+            | grep -Eo 'file_[0-9]+\.[0-9]+(-[0-9]+)?_aarch64\.deb' \
             | sort -V \
             | tail -n1 > latest.txt
 
           FILE=$(cat latest.txt)
+
+          if [[ -z "$FILE" ]]; then
+            echo "Error: Could not find latest file package!"
+            exit 1
+          fi
+
           VERSION=$(echo "$FILE" | sed -E 's/file_([^_]*)_.*/\1/')
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "file=$FILE" >> $GITHUB_OUTPUT
 
       - name: Download, normalize paths, and zip per-ABI
         run: |
@@ -58,7 +68,7 @@ jobs:
             mkdir -p "work/$arch"
             dpkg-deb -x "$DEB" "work/$arch"
 
-            # Normalize layout: usr/...
+            # Normalize layout: copy usr/ only
             mkdir -p "dist/file-$arch/usr"
             rsync -a "work/$arch/data/data/com.termux/files/usr/" \
                      "dist/file-$arch/usr/"
