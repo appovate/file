@@ -2,7 +2,7 @@ name: Update File Utility (Release)
 
 on:
   schedule:
-    - cron: "0 0 * * 0"   # every Sunday
+    - cron: "0 0 * * 0"
   workflow_dispatch:
 
 jobs:
@@ -26,7 +26,7 @@ jobs:
         run: |
           BASE_URL="https://grimler.se/termux-main/pool/main/f/file/"
 
-          # Extract latest aarch64 deb filename with proper version
+          # Fetch page and match filenames like: file_5.46-2_aarch64.deb
           wget -qO- "$BASE_URL" \
             | grep -Eo 'file_[0-9]+\.[0-9]+(-[0-9]+)?_aarch64\.deb' \
             | sort -V \
