@@ -21,62 +21,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget dpkg-dev rsync zip file
 
-      - name: Detect latest File version and URLs
+      - name: Set File version
         id: get_version
         run: |
-          VERSION=""
-          declare -A URLS
-
-          BASE="https://grimler.se/termux-main/"
-
-          declare -A archs=(
-            [aarch64]=aarch64
-            [arm]=arm
-            [i686]=i686
-            [x86_64]=x86_64
-          )
-
-          for arch in "${!archs[@]}"; do
-            # Try architecture-specific Packages index
-            IDX_URL="${BASE}dists/stable/main/binary-${arch}/Packages"
-            DEB_PATH=$(wget -qO- "$IDX_URL" \
-              | awk '/^Package: file$/ {pkg=1; next} pkg && /^Filename:/ {print $2; pkg=0}' \
-              | sort -V \
-              | tail -n1)
-
-            # Fallback to binary-all if not found
-            if [[ -z "$DEB_PATH" ]]; then
-              IDX_URL="${BASE}dists/stable/main/binary-all/Packages"
-              DEB_PATH=$(wget -qO- "$IDX_URL" \
-                | awk '/^Package: file$/ {pkg=1; next} pkg && /^Filename:/ {print $2; pkg=0}' \
-                | sort -V \
-                | tail -n1)
-            fi
-
-            if [[ -z "$DEB_PATH" ]]; then
-              echo "Error: Could not find file package for $arch!"
-              exit 1
-            fi
-
-            # Extract version from the first architecture found
-            if [[ -z "$VERSION" ]]; then
-              VERSION=$(basename "$DEB_PATH" | sed -E 's/file_([^_]*)_.*/\1/')
-            fi
-
-            URLS[$arch]="${BASE}${DEB_PATH}"
-            echo "$arch=${URLS[$arch]}"
-          done
-
+          VERSION="5.46-2"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          for arch in "${!URLS[@]}"; do
-            echo "$arch=${URLS[$arch]}" >> $GITHUB_OUTPUT
-          done
 
       - name: Download, verify, normalize paths, and zip per-ABI
         run: |
           VERSION="${{ steps.get_version.outputs.version }}"
-          rm -rf dist work
-          mkdir -p dist work
+          BASE_URL="https://packages.termux.dev/apt/termux-main/pool/main/f/file/"
 
           declare -A archs=(
             [aarch64]=aarch64
@@ -85,12 +39,15 @@ jobs:
             [x86_64]=x86_64
           )
 
+          rm -rf dist work
+          mkdir -p dist work
+
           for arch in "${!archs[@]}"; do
-            URL="${{ steps.get_version.outputs[${arch}] }}"
-            DEB_NAME=$(basename "$URL")
+            DEB_NAME="file_${VERSION}_${arch}.deb"
+            URL="$BASE_URL$DEB_NAME"
 
             echo "Downloading $DEB_NAME from $URL"
-            wget -q --show-progress --content-disposition "$URL" -O "$DEB_NAME"
+            wget -q --show-progress "$URL" -O "$DEB_NAME"
 
             # Verify it is a Debian archive
             FILE_TYPE=$(file "$DEB_NAME")
