@@ -21,16 +21,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget dpkg-dev rsync zip file
 
-      - name: Set File version
+      - name: Detect latest File version and URLs
         id: get_version
         run: |
-          VERSION="5.46-2"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION=""
+          declare -A URLS
 
-      - name: Download, verify, normalize paths, and zip per-ABI
-        run: |
-          VERSION="${{ steps.get_version.outputs.version }}"
-          BASE_URL="https://grimler.se/termux-main/pool/main/f/file/"
+          BASE="https://grimler.se/termux-main/"
 
           declare -A archs=(
             [aarch64]=aarch64
@@ -39,17 +36,63 @@ jobs:
             [x86_64]=x86_64
           )
 
+          for arch in "${!archs[@]}"; do
+            # Try architecture-specific Packages index
+            IDX_URL="${BASE}dists/stable/main/binary-${arch}/Packages"
+            DEB_PATH=$(wget -qO- "$IDX_URL" \
+              | awk '/^Package: file$/ {pkg=1; next} pkg && /^Filename:/ {print $2; pkg=0}' \
+              | sort -V \
+              | tail -n1)
+
+            # Fallback to binary-all if not found
+            if [[ -z "$DEB_PATH" ]]; then
+              IDX_URL="${BASE}dists/stable/main/binary-all/Packages"
+              DEB_PATH=$(wget -qO- "$IDX_URL" \
+                | awk '/^Package: file$/ {pkg=1; next} pkg && /^Filename:/ {print $2; pkg=0}' \
+                | sort -V \
+                | tail -n1)
+            fi
+
+            if [[ -z "$DEB_PATH" ]]; then
+              echo "Error: Could not find file package for $arch!"
+              exit 1
+            fi
+
+            # Extract version from the first architecture found
+            if [[ -z "$VERSION" ]]; then
+              VERSION=$(basename "$DEB_PATH" | sed -E 's/file_([^_]*)_.*/\1/')
+            fi
+
+            URLS[$arch]="${BASE}${DEB_PATH}"
+            echo "$arch=${URLS[$arch]}"
+          done
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          for arch in "${!URLS[@]}"; do
+            echo "$arch=${URLS[$arch]}" >> $GITHUB_OUTPUT
+          done
+
+      - name: Download, verify, normalize paths, and zip per-ABI
+        run: |
+          VERSION="${{ steps.get_version.outputs.version }}"
           rm -rf dist work
           mkdir -p dist work
 
+          declare -A archs=(
+            [aarch64]=aarch64
+            [arm]=arm
+            [i686]=i686
+            [x86_64]=x86_64
+          )
+
           for arch in "${!archs[@]}"; do
-            DEB_NAME="file_${VERSION}_${arch}.deb"
-            URL="$BASE_URL$DEB_NAME"
+            URL="${{ steps.get_version.outputs[${arch}] }}"
+            DEB_NAME=$(basename "$URL")
 
             echo "Downloading $DEB_NAME from $URL"
             wget -q --show-progress --content-disposition "$URL" -O "$DEB_NAME"
 
-            # Verify it's a Debian archive
+            # Verify it is a Debian archive
             FILE_TYPE=$(file "$DEB_NAME")
             if [[ "$FILE_TYPE" != *"Debian binary package"* ]]; then
               echo "Error: $DEB_NAME is not a valid Debian archive!"
