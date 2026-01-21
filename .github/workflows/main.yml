@@ -21,28 +21,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y wget dpkg-dev rsync zip
 
-      - name: Detect latest File version
+      - name: Detect latest Vifm version
         id: get_version
         run: |
-          BASE_URL="https://grimler.se/termux-main/pool/main/f/file/"
-
-          # Fetch page and match filenames like: file_5.46-2_aarch64.deb
+          BASE_URL="https://grimler.se/termux-packages-24/pool/main/f/file/"
           wget -qO- "$BASE_URL" \
-            | grep -Eo 'file_[0-9]+\.[0-9]+(-[0-9]+)?_aarch64\.deb' \
+            | grep -o 'vifm_[^"]*_aarch64.deb' \
             | sort -V \
             | tail -n1 > latest.txt
 
           FILE=$(cat latest.txt)
-
-          if [[ -z "$FILE" ]]; then
-            echo "Error: Could not find latest file package!"
-            exit 1
-          fi
-
           VERSION=$(echo "$FILE" | sed -E 's/file_([^_]*)_.*/\1/')
-
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "file=$FILE" >> $GITHUB_OUTPUT
 
       - name: Download, normalize paths, and zip per-ABI
         run: |
